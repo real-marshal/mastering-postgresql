@@ -218,3 +218,98 @@ from races
     left join drivers using(driverid)
 where raceid = :raceid
 order by position;
+
+-- generating some random values
+select round(random() * 10) as rnd_number,
+       gen_random_uuid() as rnd_uuid
+from generate_series(1, 10);
+
+-- some db size stats
+select tables.table_name as t_name,
+       pg_size_pretty(t_size) as t_size,
+       pg_size_pretty(t_ind_size) as t_ind_size,
+       pg_size_pretty(sum(t_size) over ()) as ts_size,
+       pg_size_pretty(sum(t_size + t_ind_size) over ()) as t_n_ind_s_size,
+       pg_size_pretty(pg_database_size('f1db')) as db_size
+from information_schema.tables
+    left join lateral (
+        select table_name,
+               pg_table_size(table_name::regclass) as t_size,
+               pg_indexes_size(table_name::regclass) as t_ind_size
+    ) as table_sizes on tables.table_name = table_sizes.table_name
+where table_schema = 'f1db'
+order by tables.table_name;
+
+-- data types sizes
+with uuid_table as (
+    select gen_random_uuid() as uuid
+)
+select name,
+       pg_size_pretty(size::bigint) as size,
+       value_used
+from uuid_table
+    left join lateral (values
+        ('boolean', pg_column_size(true::boolean), true::text),
+        ('int', pg_column_size(1::int), 1::text),
+        ('bigint', pg_column_size(1::bigint), 1::text),
+        ('smallint', pg_column_size(1::smallint), 1::text),
+        ('real', pg_column_size(1::real), 1::text),
+        ('double precision', pg_column_size(1::double precision), 1::text),
+        ('numeric', pg_column_size(1::numeric), 1::text),
+        ('numeric', pg_column_size(123456789.123456789::numeric), 123456789.123456789::text),
+        -- useless data type
+        ('money', pg_column_size(1::money), 1::text),
+        ('char', pg_column_size(1::char), 1::text),
+        ('char', pg_column_size(1234::char), 1234::text),
+        ('char(4)', pg_column_size(1234::char(4)), 1234::text),
+        ('varchar', pg_column_size(1::varchar), 1::text),
+        ('varchar', pg_column_size(1234::varchar), 1234::text),
+        ('varchar(4)', pg_column_size(1234::varchar), 1234::text),
+        ('text', pg_column_size(1::text), 1::text),
+        ('text', pg_column_size(1234::text), 1234::text),
+        ('bytea', pg_column_size('\x01'::bytea), '\x01'),
+        ('bytea', pg_column_size('\x01020304'::bytea), '\x01020304'),
+        ('bit', pg_column_size(B'1'::bit), B'1'::text),
+        ('varbit', pg_column_size(B'1'::varbit), B'1'::text),
+        ('date', pg_column_size(now()::date), now()::date::text),
+        ('time', pg_column_size(now()::time), now()::time::text),
+        -- the most useless thing ever
+        ('timetz', pg_column_size(now()::timetz), now()::timetz::text),
+        -- another useless type
+        ('timestamp', pg_column_size(now()::timestamp), now()::timestamp::text),
+        ('timestamptz', pg_column_size(now()::timestamptz), now()::timestamptz::text),
+        ('interval', pg_column_size('1 day'::interval), '1 day'::interval::text),
+        ('uuid', pg_column_size(uuid), uuid::text),
+        ('inet', pg_column_size('1.1.1.1'::inet), '1.1.1.1'::inet::text),
+        ('inet', pg_column_size('::1'::inet), '::1'::inet::text),
+        ('cidr', pg_column_size('1.1.1.1'::cidr), '1.1.1.1'::cidr::text),
+        ('cidr/16', pg_column_size('1.0.0.0/16'::cidr), '1.0.0.0/16'::cidr::text),
+        ('macaddr', pg_column_size('00:00:00:00:00:00'::macaddr), '00:00:00:00:00:00'::macaddr::text),
+        ('macaddr8', pg_column_size('00:00:00:00:00:00:00:00'::macaddr8), '00:00:00:00:00:00:00:00'::macaddr8::text),
+        ('int4range', pg_column_size('[1,1]'::int4range), '[1,1]'::int4range::text),
+        ('int4multirange', pg_column_size(int4multirange('[1,1]'::int4range, '[1,1]'::int4range)), format('%1$s, %1$s', '[1,1]'::int4range::text)),
+        ('xml', pg_column_size('<node>1</node>'::xml), '<node>1</node>'::xml::text),
+        -- obsolete nowadays
+        ('json', pg_column_size('<node>1</node>'::xml), '<node>1</node>'::xml::text),
+        -- b stands for better btw
+        ('jsonb', pg_column_size('<node>1</node>'::xml), '<node>1</node>'::xml::text)
+    ) as t(name, size, value_used) on true
+order by regexp_replace(size::text, '\D', '', 'g')::int,
+         name,
+         value_used;
+
+-- playing with regexp functions
+select
+        (
+            regexp_match(url, 'http://(.*?)/.*')
+        )[1] as url_host,
+        regexp_replace(
+            (
+                regexp_split_to_array(url, '/')
+            )[
+                array_upper(regexp_split_to_array(url, '/'), 1)
+            ],
+            '_', ' ', 'g'
+        ) as race_name
+from races
+limit 10;
